@@ -1,0 +1,62 @@
+---
+name: 'Terraform CI'
+
+on:  # yamllint disable-line rule:truthy
+  pull_request:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  ROLE_ARN: "arn:aws:iam::338531211565:role/ih-tf-aws-control-338531211565-github"
+  STATE_MGR_ROLE_ARN: "arn:aws:iam::289256138624:role/ih-tf-aws-control-338531211565-state-manager"
+
+jobs:
+  terraform:
+    name: 'Terraform Plan'
+    runs-on: ubuntu-latest
+    environment: continuous-integration
+    timeout-minutes: 5
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          role-session-name: github-action-aws-control-338531211565-ci
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+      - name: Set Terraform version
+        id: "terraform_version"
+        run: echo "IH_TF_VERSION=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.terraform_version.outputs.IH_TF_VERSION }}
+      - name: Setup Python Environment
+        run: make bootstrap-ci
+      - name: Code Style Check
+        run: make lint
+      - name: Terraform Init
+        run: make init
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+      - name: Terraform Plan
+        run: |
+          make plan
+          ih-plan publish ${{ github.repository }} ${{ github.event.pull_request.number }} plan.stdout plan.stderr
+      - name: Upload Terraform Plan
+        run: |
+          ih-plan \
+            --aws-assume-role-arn "$STATE_MGR_ROLE_ARN" \
+            upload \
+            --key-name=plans/${{ github.event.pull_request.number }}.plan \
+            tf.plan
