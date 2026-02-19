@@ -3,7 +3,7 @@ terraform {
     bucket         = "infrahouse-aws-control-338531211565"
     key            = "terraform.tfstate"
     region         = "us-west-1"
-    dynamodb_table = "infrahouse-terraform-state-locks"
+    dynamodb_table = "infrahouse-aws-control-338531211565-active-viper"
     encrypt        = true
     assume_role = {
       role_arn = "arn:aws:iam::289256138624:role/ih-tf-aws-control-338531211565-state-manager"
