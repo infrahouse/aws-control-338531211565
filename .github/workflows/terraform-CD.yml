@@ -1,0 +1,66 @@
+---
+name: 'Terraform CD'
+
+on:  # yamllint disable-line rule:truthy
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ROLE_ARN: "arn:aws:iam::338531211565:role/ih-tf-aws-control-338531211565-github"
+  STATE_MGR_ROLE_ARN: "arn:aws:iam::289256138624:role/ih-tf-aws-control-338531211565-state-manager"
+
+jobs:
+  apply:
+    name: 'Terraform Apply'
+    if: github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    environment: live
+    timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          role-session-name: github-action-aws-control-338531211565-cd
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+      - name: Set Terraform version
+        id: "terraform_version"
+        run: echo "IH_TF_VERSION=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.terraform_version.outputs.IH_TF_VERSION }}
+      - name: Setup Python Environment
+        run: make bootstrap-ci
+      - name: Download plan
+        run: |
+          ih-plan \
+            --aws-assume-role-arn "$STATE_MGR_ROLE_ARN" \
+            download \
+            plans/${{ github.event.pull_request.number }}.plan \
+            tf.plan
+      - name: Terraform Init
+        run: terraform init -input=false
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+      - name: Terraform Apply
+        run: make apply
+      - name: Remove plan
+        run: |
+          ih-plan \
+            --aws-assume-role-arn "$STATE_MGR_ROLE_ARN" \
+            remove \
+            plans/${{ github.event.pull_request.number }}.plan
